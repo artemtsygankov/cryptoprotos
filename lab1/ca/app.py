@@ -50,6 +50,7 @@ def generate():
         "public_key": base64.b64encode(public_key).decode()
     }
 
+
 @app.post("/me/sign")
 def sign(req: SignRequest):
     signer = gostsignature.new(
@@ -70,11 +71,13 @@ def sign(req: SignRequest):
         "sign": base64.b64encode(signature).decode()
     }
 
+
 @app.get("/ca/public-key")
 def get_ca_public_key():
     return {
         "public_key": base64.b64encode(ca.public_key).decode()
     }
+
 
 @app.get("/challenge")
 def get_challenge(open_key: str):
@@ -85,6 +88,7 @@ def get_challenge(open_key: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/challenge")
 def verify_challenge(req: ChallengeVerifyRequest):
     try:
@@ -94,6 +98,7 @@ def verify_challenge(req: ChallengeVerifyRequest):
         return {"validated": validated}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.post("/certs")
 def issue_certificate_after_challenge(req: IssueRequest):

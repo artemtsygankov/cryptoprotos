@@ -1,0 +1,31 @@
+services:
+  ca:
+    build: ./ca
+    container_name: ca
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  alice:
+    build: ./users
+    container_name: alice
+    ports:
+      - "8001:8000"
+    depends_on:
+      - ca
+    environment:
+      - API_URL=http://ca:8000
+      - MY_NAME=Alice
+
+  bob:
+    build: ./users
+    container_name: bob
+    ports:
+      - "8002:8000"
+    depends_on:
+      - ca
+    environment:
+      - API_URL=http://ca:8000
+      - MY_NAME=Bob

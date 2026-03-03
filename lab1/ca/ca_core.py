@@ -221,6 +221,7 @@ class CA:
         Подпись на нашем генераторе
         """
         digest = self.hash_data(data)
+        print(f"digest УЦ {digest}")
         signature = self.signer.sign(self.private_key, digest)
         return signature
     
@@ -244,7 +245,7 @@ class CA:
             str(cert.end_time) +
             cert.key_algo +
             ''.join(cert.id_data) +
-            str(cert.open_key)
+            base64.b64encode(cert.open_key).decode()
         )
         return data.encode()
     
@@ -278,7 +279,7 @@ class CA:
         Выдать сертификат
         """
         cert = Certificate(
-            id=len(self.repo.certs) + 1,
+            id=int(str(uuid4().int)[:16]),
             sign_algo=self.sign_algo,
             my_name=self.name,
             start_time=datetime.now(),
@@ -291,6 +292,8 @@ class CA:
 
         serialized = self.serialize_certificate(cert)
         cert.sign = self.sign(serialized)
+        print(f"сериализация у УЦ {serialized}")
+        print(f"подпись у УЦ{cert.sign}")
 
         self.repo.certs.append(cert)
         return cert
