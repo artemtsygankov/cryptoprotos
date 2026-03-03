@@ -49,3 +49,14 @@ def revoke_my_cert():
     return {
         "status": user.revoke_my_cert()
     }
+
+@app.post("/update_cert")
+def update_cert():
+    if not user.obtain_certificate():
+        return {
+            "status": False
+        }
+    else:
+        return {
+            "status": True
+        }
