@@ -1,6 +1,8 @@
 import subprocess
 
 def generate_gost_private_key():
+    # Кривая логика для того, чтобы вывести приватный ключ в
+    # формате строки, но без ---BEGIN...
     gen = subprocess.Popen(
         [
             "openssl",
@@ -32,6 +34,6 @@ def generate_gost_private_key():
     for line in pkey.stdout.decode().splitlines():
         if "Private key:" in line:
             hex_key = line.split(":")[1].strip()
-            return bytes.fromhex(hex_key)   # <-- ВАЖНО
+            return bytes.fromhex(hex_key)
 
     raise RuntimeError("Private key not found")

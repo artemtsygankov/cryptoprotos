@@ -10,9 +10,9 @@ from uuid import uuid4
 
 @dataclass
 class Challenges:
-    open_key: bytes
-    challenge: bytes
-    validated: bool
+    open_key: bytes                         # Открытый ключ, владение соотв. приватным ключом которого подтверждается
+    challenge: bytes                        # Челлендж
+    validated: bool                         # Доказано ли владение приватным ключом
 
 @dataclass
 class Certificate:
@@ -42,6 +42,9 @@ class CRL:
 
 
 def certificate_to_dict(cert: Certificate):
+    """
+    Функция-обертка для получения полей сертификата в JSON-ответ
+    """
     return {
         "id": cert.id,
         "sign_algo": cert.sign_algo,
@@ -50,12 +53,15 @@ def certificate_to_dict(cert: Certificate):
         "end_time": cert.end_time.isoformat(),
         "key_algo": cert.key_algo,
         "id_data": cert.id_data,
-        "open_key": base64.b64encode(cert.open_key).decode() if isinstance(cert.open_key, bytes) else str(cert.open_key),
+        "open_key": base64.b64encode(cert.open_key).decode() if isinstance(cert.open_key, bytes) else str(cert.open_key), # где-то я точно передавал строкой...
         "sign": base64.b64encode(cert.sign).decode()
     }
 
 
 def crl_to_dict(crl: CRL):
+    """
+    Функция-обертка для получения полей CRL в JSON-ответ
+    """
     return {
         "sign_algo": crl.sign_algo,
         "my_name": crl.my_name,
@@ -72,12 +78,13 @@ def crl_to_dict(crl: CRL):
     }
 
 
+# Реализация репозитория как демона-хранителя
 class Repository:
-    name: str
-    certs: List[Certificate]
-    crls: List[CRL]
-    revoked: List[RevokedCert]
-    challenges: List[Challenges]
+    name: str                      # Имя репозитория, если таких несколько
+    certs: List[Certificate]       # Список хранящихся сертификатов
+    crls: List[CRL]                # Список хранящихся CRL
+    revoked: List[RevokedCert]     # Список отозванных сертификатов
+    challenges: List[Challenges]   # Список выданных челленджей
 
     def __init__(self, name):
         """Инициализация класса Репозиторий"""
@@ -105,13 +112,14 @@ class Repository:
         return ids        
 
 
+# Реализация УЦ
 class CA:
-    name: str
-    repo: Repository
+    name: str           # Имя УЦ, если таких несколько
+    repo: Repository    # Приконнекченный к УЦ репозиторий (возможно, лучше List[Repository], но в рамках лабороторной не требовалось)
 
-    public_key: Any
-    private_key: Any
-    sign_algo: str
+    public_key: Any     # Публичный ключ УЦ
+    private_key: Any    # Приватный ключ УЦ
+    sign_algo: str      # Алгоритм подписи
 
     def __init__(self, name, repo: Repository):
         if not name:
@@ -125,27 +133,29 @@ class CA:
         self.repo = repo
 
         self.signer = gostsignature.new(
+            # Создаем генератор для создания будущего публичного ключа
             gostsignature.MODE_256,
             curve=gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB']
         )
 
-        self.private_key = generate_gost_private_key()
-        self.public_key = self.signer.public_key_generate(self.private_key)
+        self.private_key = generate_gost_private_key()                      # Генерируем приватный ключ по ГОСТ (модуль OpenSSL)
+        self.public_key = self.signer.public_key_generate(self.private_key) # С помощью генератора создаем приватный ключ
 
-        self.sign_algo = "GOST3410-2012-256"
+        self.sign_algo = "GOST3410-2012-256"                                # Алгоритм, которым будем подписывать
         
     def get_challenge(self, open_key: bytes) -> bytes:
         """
         Генерация challenge для подтверждения владения ключом
         """
         for ch in self.repo.challenges:
+            # Проходимся по всем челленджам и смотрим, есть ли на такой публичный ключ уже
             stored_key = ch.open_key if isinstance(ch.open_key, bytes) else ch.open_key.encode()
             if stored_key == open_key and not ch.validated:
                 raise ValueError("Challenge error: Challenge already exists and not validated")
 
-        challenge = gostrandom.new(32).random()
+        challenge = gostrandom.new(32).random() # Генерируем случайный челлендж
 
-        self.repo.challenges.append(
+        self.repo.challenges.append(            # Добавляем челлендж в репозиторийы
             Challenges(
                 open_key=open_key,
                 challenge=challenge,
@@ -156,6 +166,9 @@ class CA:
         return challenge
 
     def verify_challenge(self, open_key: bytes, signature: bytes) -> bool:
+        """
+        Проверка челленджа
+        """
         challenge_obj = None
 
         for ch in self.repo.challenges:
@@ -167,7 +180,7 @@ class CA:
         if not challenge_obj:
             raise ValueError("Challenge error: Not found or already validated")
 
-        is_valid = self.verify(
+        is_valid = self.verify(         # Проверка подписи штатными методами (ниже)
             challenge_obj.challenge,
             signature,
             open_key
@@ -180,6 +193,9 @@ class CA:
         return True
 
     def hash_data(self, data: bytes) -> bytes:
+        """
+        Функция возвращает хэш даты Стрибогом
+        """
         hasher = gosthash.new("streebog256")
         hasher.update(data)
         return hasher.digest()
@@ -201,16 +217,25 @@ class CA:
         self.repo.certs.append(cert)
 
     def sign(self, data: bytes) -> bytes:
+        """
+        Подпись на нашем генераторе
+        """
         digest = self.hash_data(data)
         signature = self.signer.sign(self.private_key, digest)
         return signature
     
     def verify(self, data: bytes, signature: bytes, public_key: bytes) -> bool:
+        """
+        Проверка подписи
+        """
         digest = self.hash_data(data)
         return self.signer.verify(public_key, digest, signature)
     
     @staticmethod
     def serialize_certificate(cert: Certificate) -> bytes:
+        """
+        Сериализация сертификата, чтобы подписать его как строку
+        """
         data = (
             str(cert.id) +
             cert.sign_algo +
@@ -225,6 +250,9 @@ class CA:
     
     @staticmethod
     def serialize_crl(crl: CRL) -> bytes:
+        """
+        Сериализация CRL, чтобы подписать его как строку
+        """
         data = (
             crl.sign_algo +
             crl.my_name +
@@ -236,6 +264,9 @@ class CA:
         return data.encode()
     
     def issue_certificate_after_challenge(self, subject_public_key, subject_data):
+        """
+        Проверить челлендж и перейти к выдаче сертификата
+        """
         for ch in self.repo.challenges:
             if ch.open_key == subject_public_key and ch.validated:
                 return self.issue_certificate(subject_public_key, subject_data)
@@ -243,6 +274,9 @@ class CA:
         raise ValueError("Challenge not validated")
 
     def issue_certificate(self, subject_public_key, subject_data):
+        """
+        Выдать сертификат
+        """
         cert = Certificate(
             id=len(self.repo.certs) + 1,
             sign_algo=self.sign_algo,
