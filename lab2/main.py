@@ -6,6 +6,7 @@ from typing import Optional, Dict
 
 from pygost.gost34112012256 import GOST34112012256
 from pygost.gost3412 import GOST3412Kuznechik
+from pygost import gost3413
 
 
 def streebog256(data: bytes) -> bytes:
@@ -59,37 +60,31 @@ def pbkdf2_hmac_streebog256(password: bytes, salt: bytes,
     return dk[:dk_len]
 
 
-def ecb_encrypt(key_enc: bytes, key_mac: bytes,
-                plaintext: bytes, ad: bytes) -> tuple:
+def aead_encrypt(key_enc: bytes, key_mac: bytes, iv: bytes,
+                 plaintext: bytes, ad: bytes) -> tuple:
     """
-    Детерминированное шифрование: Кузнечик-ECB (без IV) + MAC. EtM.
-    ВНИМАНИЕ: ECB небезопасен — одинаковый открытый текст → одинаковый шифртекст.
-    Используется намеренно для демонстрации уязвимости.
+    Аутентифицированное шифрование: Кузнечик-CTR + Кузнечик-MAC. EtM.
     """
     bs = 16
+
     ciph_enc = GOST3412Kuznechik(key_enc)
-
-    # Паддинг до кратного bs (PKCS#7-style)
-    pad_len = bs - (len(plaintext) % bs)
-    padded = plaintext + bytes([pad_len] * pad_len)
-
-    # ECB: шифруем каждый блок независимо
-    ciphertext = b''
-    for i in range(0, len(padded), bs):
-        ciphertext += ciph_enc.encrypt(padded[i:i + bs])
+    ciphertext = gost3413.ctr(
+        ciph_enc.encrypt, bs, plaintext, iv
+    )
 
     # MAC(AD || ciphertext)
     ciph_mac = GOST3412Kuznechik(key_mac)
+    #  AD (8 байт) || AD || ciphertext
     mac_input = struct.pack('>Q', len(ad)) + ad + ciphertext
     mac_tag = gost3413.mac(ciph_mac.encrypt, bs, mac_input)
 
     return ciphertext, mac_tag
 
 
-def ecb_decrypt(key_enc: bytes, key_mac: bytes,
-                ciphertext: bytes, ad: bytes, mac_tag: bytes) -> bytes:
+def aead_decrypt(key_enc: bytes, key_mac: bytes, iv: bytes,
+                 ciphertext: bytes, ad: bytes, mac_tag: bytes) -> bytes:
     """
-    Проверка MAC, затем ECB-расшифрование.
+    Проверка MAC, затем CTR-расшифрование.
     """
     bs = 16
 
@@ -99,17 +94,23 @@ def ecb_decrypt(key_enc: bytes, key_mac: bytes,
     computed_tag = gost3413.mac(ciph_mac.encrypt, bs, mac_input)
 
     if computed_tag != mac_tag:
-        raise ValueError("Вы все врете!")
+        raise ValueError(
+            "Вы все врете!")
 
-    # ECB-расшифрование
+    # Расшифрование
     ciph_enc = GOST3412Kuznechik(key_enc)
-    plaintext_padded = b''
-    for i in range(0, len(ciphertext), bs):
-        plaintext_padded += ciph_enc.decrypt(ciphertext[i:i + bs])
+    plaintext = gost3413.ctr(
+        ciph_enc.encrypt, bs, ciphertext, iv
+    )
 
-    # Убираем PKCS#7 паддинг
-    pad_len = plaintext_padded[-1]
-    return plaintext_padded[:-pad_len]
+    return plaintext
+
+
+def generate_iv() -> bytes:
+    """
+    По ГОСТ Р 34.13-2015 для CTR IV = половина блока = 8 байт.
+    """
+    return secrets.token_bytes(8)
 
 
 class PasswordManager:
@@ -162,11 +163,12 @@ class PasswordManager:
 
     @staticmethod
     def _pad_password(password: str) -> bytes:
+        """Добавить паролю паддинг"""
         pwd = password.encode('utf-8')
         if len(pwd) > PasswordManager.MAX_PASSWORD_LENGTH - 1:
             raise ValueError("Пароль слишком длинный (макс 63 байта)")
         return (bytes([len(pwd)]) + pwd +
-                b'\x00' * (PasswordManager.MAX_PASSWORD_LENGTH - 1 - len(pwd)))
+                secrets.token_bytes(PasswordManager.MAX_PASSWORD_LENGTH - 1 - len(pwd)))
 
 
     @staticmethod
@@ -177,29 +179,30 @@ class PasswordManager:
 
     def _encrypt_entry(self, domain: str, password: str) -> dict:
         """
-        ECB (детерминированное) + MAC.
-        Одинаковый пароль → одинаковый шифртекст (намеренно).
+        CTR + MAC.
         """
         padded = self._pad_password(password)
+        iv = generate_iv()
         ad = domain.encode('utf-8')
 
-        ct, tag = ecb_encrypt(self._k_enc, self._k_mac, padded, ad)
+        ct, tag = aead_encrypt(self._k_enc, self._k_mac, iv, padded, ad)
 
         return {
+            'iv': iv.hex(),
             'ciphertext': ct.hex(),
             'tag': tag.hex()
         }
 
-
     def _decrypt_entry(self, domain: str, entry: dict) -> str:
         """
-        Проверка MAC + ECB-расшифрование
+        Проверка MAC + CTR
         """
+        iv = bytes.fromhex(entry['iv'])
         ct = bytes.fromhex(entry['ciphertext'])
         tag = bytes.fromhex(entry['tag'])
         ad = domain.encode('utf-8')
 
-        padded = ecb_decrypt(self._k_enc, self._k_mac, ct, ad, tag)
+        padded = aead_decrypt(self._k_enc, self._k_mac, iv, ct, ad, tag)
         return self._unpad_password(padded)
 
 
@@ -235,7 +238,6 @@ class PasswordManager:
             return True
         else:
             return False
-
 
     def init_new(self, master_password: str):
         """Создание новой пустой базы паролей"""
