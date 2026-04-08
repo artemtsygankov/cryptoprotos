@@ -39,7 +39,7 @@ def run_demo(sim):
     sim.setup()
 
     # Client_1
-    print("\n" + "=" * 60)
+    
     print("CLIENT_1: AES-128-GCM, P-256, mutual auth")
     
 
@@ -51,7 +51,7 @@ def run_demo(sim):
         sim.send_message_server_to_client1("Ответ после KeyUpdate")
 
     # Client_2
-    print("\n" + "=" * 60)
+    
     print("CLIENT_2: AES-256-GCM, P-384, server-only auth")
     
 
@@ -60,7 +60,7 @@ def run_demo(sim):
         sim.key_update_server_to_client2()
 
     # отзыв
-    print("\n" + "=" * 60)
+    
     print("ОТЗЫВ СЕРТИФИКАТА")
     
 
@@ -68,7 +68,7 @@ def run_demo(sim):
     sim.revoke_and_test(1)
     sim.show_certificates()
 
-    print("\n" + "=" * 60)
+    
     print("ДЕМО ЗАВЕРШЕНО")
     
 
