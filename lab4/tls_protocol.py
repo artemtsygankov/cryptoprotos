@@ -1,120 +1,80 @@
+"""
+Сообщения и деривация ключей TLS 1.3.
+"""
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from enum import Enum
 
-from crypto_gost import GOSTKDF
+from crypto_tls import TLSKDF
 
 
 class KeyExchangeMethod(Enum):
-    """Метод обмена ключами."""
-    GOST_DH_256 = "gost_dh_256"   # ГОСТ на 256-бит кривой
-    GOST_DH_512 = "gost_dh_512"   # ГОСТ на 512-бит кривой
+    ECDHE_P256 = "ecdhe_p256"
+    ECDHE_P384 = "ecdhe_p384"
 
 
 class AuthMode(Enum):
-    """Режим аутентификации."""
-    MUTUAL = "mutual"       # Взаимная
-    SERVER_ONLY = "server"  # Только сервер
+    MUTUAL = "mutual"        # взаимная
+    SERVER_ONLY = "server"   # только сервер
 
 
-# ============================================================================
-# СООБЩЕНИЯ ПРОТОКОЛА
-# ============================================================================
+# --- Сообщения протокола ---
 
 @dataclass
 class ClientHello:
-    """
-    Первое сообщение клиента.
-    
-    Содержит публичный ключ DH, nonce и предлагаемые криптонаборы.
-    """
-    u: bytes                        # Публичный ключ DH клиента (g^α)
-    nonce_c: bytes                  # Одноразовое число клиента
-    offer: dict                     # Предлагаемые криптонаборы
-    key_exchange_type: str          # Тип обмена ключами
-    curve_bits: int                 # Размер кривой
+    """Первое сообщение клиента: эфемерный ключ + nonce + cipher suites."""
+    key_share: bytes        # публичный ключ ECDHE
+    nonce_c: bytes          # 32 байта
+    offer: dict             # предлагаемые параметры
+    key_exchange_type: str
+    curve_bits: int
 
 
 @dataclass
 class ServerHello:
-    """
-    Ответ сервера.
-
-    Содержит публичный ключ DH, nonce, выбранный криптонабор
-    и зашифрованные поля (сертификат, подпись, MAC).
-    """
-    v: bytes                        # Публичный ключ DH сервера (g^β)
-    nonce_s: bytes                  # Одноразовое число сервера
-    mode: dict                      # Выбранный криптонабор
-    ukm: bytes                      # Пользовательский ключевой материал (UKM, 8 байт)
-    c1_encrypted: bytes             # CertRequest (зашифрован)
-    c2_encrypted: bytes             # Сертификат сервера (зашифрован)
-    c3_encrypted: bytes             # Подпись сервера (зашифрована)
-    c4: bytes                       # MAC транскрипции
+    """Ответ сервера: ключ + nonce + зашифрованные сертификат/подпись/MAC."""
+    key_share: bytes        # публичный ключ ECDHE сервера
+    nonce_s: bytes
+    mode: dict              # выбранный cipher suite
+    c1_encrypted: bytes     # EncryptedExtensions (CertRequest)
+    c2_encrypted: bytes     # Certificate сервера
+    c3_encrypted: bytes     # CertificateVerify
+    c4: bytes               # Finished (HMAC)
 
 
 @dataclass
 class ClientFinished:
-    """
-    Финальное сообщение клиента.
-    
-    При взаимной аутентификации содержит сертификат и подпись клиента.
-    """
-    c5_encrypted: Optional[bytes]   # Сертификат клиента (если требуется)
-    c6_encrypted: Optional[bytes]   # Подпись клиента (если требуется)
-    c7: bytes                       # MAC транскрипции
+    """Финальное сообщение клиента: сертификат + подпись (если mutual) + MAC."""
+    c5_encrypted: Optional[bytes]   # Certificate клиента
+    c6_encrypted: Optional[bytes]   # CertificateVerify клиента
+    c7: bytes                       # Finished (HMAC)
 
 
-# ============================================================================
-# КРИПТОГРАФИЧЕСКИЕ ОПЕРАЦИИ TLS
-# ============================================================================
+# --- Деривация ключей ---
 
 class TLSKeyDerivation:
-    """Выработка ключей для TLS."""
+    """HKDF-деривация ключей для хэндшейка и сессии."""
 
     @staticmethod
-    def derive_handshake_keys(shared_secret: bytes, transcript: bytes) -> Tuple[bytes, bytes]:
-        """
-        Вывод ключей рукопожатия k_sh (шифрование) и k_sm (MAC).
-        
-        Args:
-            shared_secret: Общий секрет DH (g^αβ)
-            transcript: Транскрипция протокола
-            
-        Returns:
-            Кортеж (k_sh, k_sm)
-        """
+    def derive_handshake_keys(shared_secret, transcript, curve_bits=256):
+        """Ключи рукопожатия: (k_enc, k_mac)."""
+        key_len = 16 if curve_bits == 256 else 32
         combined = shared_secret + transcript
-        k_sh = GOSTKDF.derive(combined, b"tls13_handshake_encrypt_key", 32)
-        k_sm = GOSTKDF.derive(combined, b"tls13_handshake_mac_key", 32)
-        return k_sh, k_sm
+        k_enc = TLSKDF.derive(combined, b"tls13 hs enc", key_len, curve_bits)
+        k_mac = TLSKDF.derive(combined, b"tls13 hs mac", 32, curve_bits)
+        return k_enc, k_mac
 
     @staticmethod
-    def derive_session_keys(shared_secret: bytes, transcript: bytes) -> Tuple[bytes, bytes]:
-        """
-        Вывод сеансовых ключей k_c2s и k_s2c.
-        
-        Args:
-            shared_secret: Общий секрет DH
-            transcript: Полная транскрипция протокола
-            
-        Returns:
-            Кортеж (k_c2s, k_s2c)
-        """
+    def derive_session_keys(shared_secret, transcript, curve_bits=256):
+        """Сеансовые ключи: (k_c2s, k_s2c)."""
+        key_len = 16 if curve_bits == 256 else 32
         combined = shared_secret + transcript
-        k_c2s = GOSTKDF.derive(combined, b"tls13_client_to_server_key", 32)
-        k_s2c = GOSTKDF.derive(combined, b"tls13_server_to_client_key", 32)
+        k_c2s = TLSKDF.derive(combined, b"tls13 c2s key", key_len, curve_bits)
+        k_s2c = TLSKDF.derive(combined, b"tls13 s2c key", key_len, curve_bits)
         return k_c2s, k_s2c
 
     @staticmethod
-    def update_key(old_key: bytes) -> bytes:
-        """
-        Обновление ключа (KeyUpdate).
-        
-        Args:
-            old_key: Текущий ключ
-            
-        Returns:
-            Новый ключ
-        """
-        return GOSTKDF.derive(old_key, b"tls13_key_update", 32)
+    def update_key(old_key, curve_bits=256):
+        """KeyUpdate (RFC 8446 §4.6.3)."""
+        return TLSKDF.derive(old_key, b"tls13 key update", len(old_key), curve_bits)

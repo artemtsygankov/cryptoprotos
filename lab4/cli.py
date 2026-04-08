@@ -1,193 +1,170 @@
 #!/usr/bin/env python3
+"""
+CLI для лаб. работы №4 — TLS 1.3.
+"""
+
 from simulator import TLSSimulator
 
 
 def print_header():
-    """Печать заголовка программы."""
-    print("ЛАБОРАТОРНАЯ РАБОТА №4: TLS 1.3 С ГОСТ КРИПТОГРАФИЕЙ")
-    print("Криптографические примитивы: ГОСТ Р 34.10-2012, ГОСТ Р 34.11-2012, ГОСТ Р 34.12-2015, VKO")
+    print("ЛР4: TLS 1.3")
+    print("Cipher Suites: AES_128_GCM_SHA256, AES_256_GCM_SHA384")
 
 
 def print_menu():
-    """Печать меню команд."""
-    print("\nМЕНЮ КОМАНД")
-    print("1.  setup            - Инициализация участников")
-    print("2.  handshake1       - Рукопожатие с Клиентом_1")
-    print("3.  handshake2       - Рукопожатие с Клиентом_2")
-    print("4.  send1 <сообщение> - Отправить от Клиента_1 серверу")
-    print("5.  recv1 <сообщение> - Отправить от Сервера Клиенту_1")
-    print("6.  send2 <сообщение> - Отправить от Клиента_2 серверу")
-    print("7.  keyupdate1       - Обновление ключей (Клиент_1)")
-    print("8.  keyupdate2       - Обновление ключей (Сервер)")
-    print("9.  revoke <номер>   - Отозвать сертификат")
-    print("10. certs            - Показать сертификаты")
-    print("11. demo             - Полная демонстрация")
-    print("12. help             - Показать меню")
-    print("0.  exit             - Выход")
+    print("""
+Команды:
+  1  setup            Инициализация
+  2  handshake1       Хэндшейк Client_1 (P-256, mutual)
+  3  handshake2       Хэндшейк Client_2 (P-384, server-only)
+  4  send1 <msg>      Client_1 -> Server
+  5  recv1 <msg>      Server -> Client_1
+  6  send2 <msg>      Client_2 -> Server
+  7  keyupdate1       KeyUpdate (Client_1)
+  8  keyupdate2       KeyUpdate (Server -> Client_2)
+  9  revoke <N>       Отозвать сертификат
+  10 certs            Список сертификатов
+  11 demo             Полная демонстрация
+  12 help             Это меню
+  0  exit             Выход
+""")
 
 
-def run_demo(sim: TLSSimulator):
-    """
-    Запуск полной демонстрации.
+def run_demo(sim):
+    """Полный прогон: хэндшейки, сообщения, KeyUpdate, отзыв."""
     
-    Демонстрирует:
-    - Инициализацию участников
-    - Рукопожатие с обоими клиентами
-    - Обмен сообщениями
-    - Обновление ключей
-    - Отзыв сертификата
-    """
-    print("ПОЛНАЯ ДЕМОНСТРАЦИЯ TLS 1.3 С ГОСТ КРИПТОГРАФИЕЙ")
+    print("ДЕМО TLS 1.3")
+    
 
-    # Инициализация
     sim.setup()
 
-    # === Клиент_1 ===
-    print("\nДЕМОНСТРАЦИЯ: КЛИЕНТ_1 (256 бит, взаимная аутентификация)")
+    # Client_1
+    print("\n" + "=" * 60)
+    print("CLIENT_1: AES-128-GCM, P-256, mutual auth")
+    
 
     if sim.handshake_client1():
-        # Обмен сообщениями
-        sim.send_message_client1("Привет от Клиента_1!")
-        sim.send_message_server_to_client1("Ответ сервера для Клиента_1")
-
-        # Обновление ключей
+        sim.send_message_client1("Привет от Client_1")
+        sim.send_message_server_to_client1("Ответ сервера")
         sim.key_update_client1()
-
-        # Сообщение после обновления
-        sim.send_message_client1("Сообщение после KeyUpdate")
+        sim.send_message_client1("После KeyUpdate")
         sim.send_message_server_to_client1("Ответ после KeyUpdate")
 
-    # === Клиент_2 ===
-    print("\nДЕМОНСТРАЦИЯ: КЛИЕНТ_2 (512 бит, односторонняя аутентификация)")
+    # Client_2
+    print("\n" + "=" * 60)
+    print("CLIENT_2: AES-256-GCM, P-384, server-only auth")
+    
 
     if sim.handshake_client2():
-        sim.send_message_client2("Привет от Клиента_2!")
+        sim.send_message_client2("Привет от Client_2")
         sim.key_update_server_to_client2()
 
-    # === Отзыв сертификата ===
-    print("\nДЕМОНСТРАЦИЯ: ОТЗЫВ СЕРТИФИКАТА")
+    # отзыв
+    print("\n" + "=" * 60)
+    print("ОТЗЫВ СЕРТИФИКАТА")
+    
 
     sim.show_certificates()
-    sim.revoke_and_test(1)  # Отзыв первого сертификата (сервер)
+    sim.revoke_and_test(1)
     sim.show_certificates()
 
-    print("\nДЕМОНСТРАЦИЯ ЗАВЕРШЕНА")
+    print("\n" + "=" * 60)
+    print("ДЕМО ЗАВЕРШЕНО")
+    
 
 
 def main():
-    """Главная функция CLI."""
     print_header()
-
     sim = TLSSimulator()
     print_menu()
 
     while True:
         try:
-            cmd = input("\n> ").strip()
-
-            if not cmd:
+            raw = input("\n> ").strip()
+            if not raw:
                 continue
 
-            parts = cmd.split(maxsplit=1)
-            command = parts[0].lower()
+            parts = raw.split(maxsplit=1)
+            cmd = parts[0].lower()
             arg = parts[1] if len(parts) > 1 else ""
 
-            # Выход
-            if command in ("exit", "quit", "0"):
-                print("Выход...")
+            if cmd in ("exit", "quit", "0"):
                 break
 
-            # Инициализация
-            elif command in ("setup", "1"):
+            elif cmd in ("setup", "1"):
                 sim.setup()
 
-            # Рукопожатие с Клиентом_1
-            elif command in ("handshake1", "2"):
-                if sim.ca is None:
-                    print("[ERROR] Сначала выполните setup")
+            elif cmd in ("handshake1", "2"):
+                if not sim.ca:
+                    print("Сначала setup")
                 else:
                     sim.handshake_client1()
 
-            # Рукопожатие с Клиентом_2
-            elif command in ("handshake2", "3"):
-                if sim.ca is None:
-                    print("[ERROR] Сначала выполните setup")
+            elif cmd in ("handshake2", "3"):
+                if not sim.ca:
+                    print("Сначала setup")
                 else:
                     sim.handshake_client2()
 
-            # Отправка от Клиента_1
-            elif command in ("send1", "4"):
-                if sim.client1 is None or sim.client1.k_c2s is None:
-                    print("[ERROR] Сначала выполните setup и handshake1")
+            elif cmd in ("send1", "4"):
+                if not sim.client1 or not sim.client1.k_c2s:
+                    print("Сначала setup + handshake1")
                 else:
-                    msg = arg if arg else "Тестовое сообщение от Клиента_1"
-                    sim.send_message_client1(msg)
+                    sim.send_message_client1(arg or "Тест от Client_1")
 
-            # Отправка от Сервера к Клиенту_1
-            elif command in ("recv1", "5"):
-                if sim.server is None or sim.server.k_s2c is None:
-                    print("[ERROR] Сначала выполните setup и handshake1")
+            elif cmd in ("recv1", "5"):
+                if not sim.server or not sim.server.k_s2c:
+                    print("Сначала setup + handshake1")
                 else:
-                    msg = arg if arg else "Тестовый ответ от Сервера"
-                    sim.send_message_server_to_client1(msg)
+                    sim.send_message_server_to_client1(arg or "Ответ сервера")
 
-            # Отправка от Клиента_2
-            elif command in ("send2", "6"):
-                if sim.client2 is None or sim.client2.k_c2s is None:
-                    print("[ERROR] Сначала выполните setup и handshake2")
+            elif cmd in ("send2", "6"):
+                if not sim.client2 or not sim.client2.k_c2s:
+                    print("Сначала setup + handshake2")
                 else:
-                    msg = arg if arg else "Тестовое сообщение от Клиента_2"
-                    sim.send_message_client2(msg)
+                    sim.send_message_client2(arg or "Тест от Client_2")
 
-            # KeyUpdate от Клиента_1
-            elif command in ("keyupdate1", "7"):
-                if sim.client1 is None or sim.client1.k_c2s is None:
-                    print("[ERROR] Сначала выполните setup и handshake1")
+            elif cmd in ("keyupdate1", "7"):
+                if not sim.client1 or not sim.client1.k_c2s:
+                    print("Сначала setup + handshake1")
                 else:
                     sim.key_update_client1()
 
-            # KeyUpdate от Сервера для Клиента_2
-            elif command in ("keyupdate2", "8"):
-                if sim.client2 is None or sim.client2.k_c2s is None:
-                    print("[ERROR] Сначала выполните setup и handshake2")
+            elif cmd in ("keyupdate2", "8"):
+                if not sim.client2 or not sim.client2.k_c2s:
+                    print("Сначала setup + handshake2")
                 else:
                     sim.key_update_server_to_client2()
 
-            # Отзыв сертификата
-            elif command in ("revoke", "9"):
-                if sim.ca is None:
-                    print("[ERROR] Сначала выполните setup")
+            elif cmd in ("revoke", "9"):
+                if not sim.ca:
+                    print("Сначала setup")
                 else:
                     try:
-                        serial = int(arg) if arg else 1
-                        sim.revoke_and_test(serial)
+                        sim.revoke_and_test(int(arg) if arg else 1)
                     except ValueError:
-                        print("[ERROR] Укажите номер сертификата (число)")
+                        print("Укажите номер сертификата")
 
-            # Показать сертификаты
-            elif command in ("certs", "10"):
-                if sim.ca is None:
-                    print("[ERROR] Сначала выполните setup")
+            elif cmd in ("certs", "10"):
+                if not sim.ca:
+                    print("Сначала setup")
                 else:
                     sim.show_certificates()
 
-            # Полная демонстрация
-            elif command in ("demo", "11"):
+            elif cmd in ("demo", "11"):
                 run_demo(sim)
 
-            # Помощь
-            elif command in ("help", "12", "?"):
+            elif cmd in ("help", "12", "?"):
                 print_menu()
 
             else:
-                print(f"[ERROR] Неизвестная команда: {command}")
-                print("Введите 'help' для списка команд")
+                print(f"Неизвестная команда: {cmd}. help — список команд")
 
         except KeyboardInterrupt:
-            print("\nВыход...")
+            print()
             break
         except Exception as e:
-            print(f"[ERROR] {e}")
+            print(f"Ошибка: {e}")
 
 
 if __name__ == "__main__":
